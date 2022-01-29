@@ -215,7 +215,7 @@ for tick = 1:L
 end
 
 % Plot
-vid_path = sprintf('../vid/unit_test/2-sphere_%s.mp4',datestr(now,'yy_mm_dd_HH_MM_SS'));
+vid_path = sprintf('../vid/2-sphere_%s.mp4',datestr(now,'yy_mm_dd_HH_MM_SS'));
 vobj = init_vid_record(vid_path,'HZ',50,'SAVE_VID',SAVE_VID);
 fig_idx = 1;
 fig = set_fig(figure(fig_idx),'pos',[0.0,0.5,0.3,0.5],'view_info',[80,26],...
@@ -674,7 +674,7 @@ while 1 % loop until self-collision occurs
     if SC, break; end
 end % while 1 % loop until self-collision occurs
 % Loop to solve IK
-vid_path = sprintf('../vid/unit_test/sc_handle_%s_seed%02d.mp4',robot_name,rseed); HZ = 10;
+vid_path = sprintf('../vid/sc_handle_%s_seed%02d.mp4',robot_name,rseed); HZ = 10;
 tick = 0; vobj = init_vid_record(vid_path,'HZ',HZ,'SAVE_VID',SAVE_VID);
 while SC % loop until collision-free
     tick = tick + 1;
@@ -912,7 +912,7 @@ while true
     end
 end
 
-%% Handle external collision handling with capsules
+%% Handle external collision handling with capsules (ambidex)
 ccc
 % Configuration
 SAVE_VID = 0;
@@ -928,7 +928,9 @@ cap1 = get_capsule_shape('T_offset',pr2t(cv([0.4,-0.9,1.0]),''),...
 cap2 = get_capsule_shape('T_offset',pr2t(cv([0.4,0.9,1.0]),''),...
     'radius',0.5,'height',0.2);
 external_capsules = {cap1,cap2};
-vid_path = sprintf('../vid/unit_test/ec_handle_%s.mp4',chain_robot.name); HZ = 10;
+
+% External collision handling routine
+vid_path = sprintf('../vid/ec_handle_%s.mp4',chain_robot.name); HZ = 10;
 vobj = init_vid_record(vid_path,'HZ',HZ,'SAVE_VID',SAVE_VID);
 for tick = 1:100
     % Check external collisions
@@ -938,7 +940,8 @@ for tick = 1:100
     if isempty(ec_link_cap_pairs), EC = 0; else, EC = 1; end
     
     % Plot
-    fig_idx = 1; view_info = [51,25]; axis_info = [-1,1,-1.5,1.5,0,2]; axes_info = [0.02,0,0.95,0.9];
+    fig_idx = 1; view_info = [51,25]; axis_info = [-1,1,-1.5,1.5,0,2]; 
+    axes_info = [0.02,0,0.95,0.9];
     fig = plot_chain(chain_robot,'fig_idx',fig_idx,'subfig_idx',1,'fig_pos',[0.0,0.5,0.3,0.45],...
         'view_info',view_info,...
         'axis_info',axis_info,'AXIS_OFF',0,'axes_info',axes_info,'mfa',0.1,...
@@ -960,7 +963,143 @@ for tick = 1:100
             'T',T_i,'cfc','b','cfa',0.4,'cec','none');
     end
     for cap_idx = 1:length(external_capsules)
-        plot_capsule(external_capsules{cap_idx},'fig_idx',fig_idx,'subfig_idx',50+cap_idx,'cfc','r','cfa',0.2);
+        plot_capsule(external_capsules{cap_idx},'fig_idx',fig_idx,'subfig_idx',50+cap_idx,...
+            'cfc','r','cfa',0.2);
+    end
+    % Plot IK information
+    ik_plot_info = get_ik_plot_info_from_ik_info(ik_info); % IK information
+    adl = chain_robot.sz.xyz_len(3)/5;
+    plot_ik_targets('chain_robot',chain_robot,'ik_plot_info',ik_plot_info,'sr',0.02,...
+        'PLOT_ARROW',1,'adl',adl,'adsw',adl/10,'adtw',adl/5);
+    if EC
+        title_str = sprintf('[%d] External Collision (%.3f)',tick,ec_dist);
+    else
+        title_str = sprintf('[%d] Collision Free',tick);
+    end
+    plot_title(title_str,'tfs',20);
+    drawnow; record_vid(vobj,'fig',fig);
+    if (EC == 0), break; end
+end
+end_vid_record(vobj);
+fprintf(2,'Done.\n');
+
+%% Plot multiple robots at once
+ccc
+robot_names = {'ambidex_labs','atlas','coman','thormang_rilab'};
+n_robot = length(robot_names);
+chain_robots = cell(1,n_robot); chain_heights = zeros(1,n_robot); chain_widths = zeros(1,n_robot);
+for r_idx = 1:n_robot
+    robot_name = robot_names{r_idx};
+    urdf_path = sprintf('../../yet-another-robotics-toolbox/urdf/%s/%s_urdf.xml',...
+        robot_name,robot_name);
+    cache_folder = '../cache';
+    switch robot_name
+        case 'ambidex_labs'
+            chain_robot = get_ambidex_labs('urdf_path',urdf_path,'cache_folder',cache_folder);
+        otherwise
+            chain_robot = get_chain_from_urdf_with_caching(robot_name,...
+                'RE',0,'urdf_path',urdf_path,'cache_folder',cache_folder);
+            chain_robot = add_joi_to_chain(chain_robot,'ADD_ELBOW_GUIDE',1,'ADD_SHOULDER_GUIDE',0);
+    end
+    chain_robot.joi = get_joi_chain(chain_robot);
+    chain_robot = get_chain_t_pose(chain_robot); % T-pose
+    chain_robots{r_idx} = chain_robot;
+    sz = get_chain_sz(chain_robot);
+    chain_heights(r_idx) = sz.xyz_len(3);
+    chain_widths(r_idx) = sz.xyz_len(2);
+end
+[~,sorted_idx] = sort(chain_heights); % sort with heights
+y_offset = 0;
+for r_idx = 1:n_robot
+    sort_idx = sorted_idx(r_idx);
+    chain_robot = chain_robots{sort_idx};
+    subfig_idx = r_idx;
+    % Move the robot and plot
+    idx_top = get_topmost_idx(chain_robot);
+    chain_robot = move_chain_two_feet_on_ground(chain_robot);
+    % Random upper body position
+    RANDOM_POSE = 0;
+    if RANDOM_POSE
+        rev_joint_names = get_rev_joint_names_route_to_jois(chain_robot,{'rh','lh'});
+        q = get_q_chain(chain_robot,rev_joint_names);
+        q_rand = q + 20*D2R*randn(size(q));
+        chain_robot = update_chain_q(chain_robot,rev_joint_names,q_rand);
+    end
+    if r_idx == 1
+    else
+        y_offset = y_offset + ...
+            0.5*(chain_widths(sorted_idx(r_idx-1)) + chain_widths(sorted_idx(r_idx)));
+    end
+    chain_robot = move_chain(chain_robot,chain_robot.joint(idx_top).p + cv([0.0,y_offset,0.0]));
+    axis_info = [-inf,inf,-inf,inf,-inf,2];
+    axes_info = [0.02,0,0.95,0.9];
+    plot_chain(chain_robot,'fig_idx',1,'subfig_idx',subfig_idx,'fig_pos',[0.0,0.5,0.5,0.3],...
+        'axis_info',axis_info,'AXIS_OFF',1,'axes_info',axes_info,'mfa',0.1,...
+        'PLOT_LINK',1,'PLOT_BOX_ADDED',1,'PLOT_ROTATE_AXIS',0,'DISREGARD_JOI_GUIDE',1);
+end
+plot_title('Humanoid Robots','fig_idx',1,'tfs',20);
+
+%% Handle external collision handling with capsules (COMAN)
+ccc
+
+% Configuration
+SAVE_VID = 1;
+
+% Robot
+robot_name = 'coman';
+urdf_path = sprintf('../../yet-another-robotics-toolbox/urdf/%s/%s_urdf.xml',...
+    robot_name,robot_name);
+chain_robot = get_chain_from_urdf_with_caching(robot_name,...
+    'RE',0,'urdf_path',urdf_path,'cache_folder','../cache');
+chain_robot = add_joi_to_chain(chain_robot,'ADD_ELBOW_GUIDE',1,'ADD_SHOULDER_GUIDE',0);
+chain_robot.joi = get_joi_chain(chain_robot);
+chain_robot = get_chain_t_pose(chain_robot); % T-pose
+chain_robot = update_chain_q(chain_robot,...
+    {'RShLat','RElbj','LShLat','LShYaw','LElbj'},[31,-66,-55,30,-90]*D2R);
+
+% Capsules
+cap1 = get_capsule_shape('T_offset',pr2t(cv([0.1,-0.5,0.7]),''),...
+    'radius',0.2,'height',0.3);
+cap2 = get_capsule_shape('T_offset',pr2t(cv([0.1,0.4,0.7]),''),...
+    'radius',0.1,'height',0.2);
+external_capsules = {cap1,cap2};
+
+% External collision handling routine
+vid_path = sprintf('../vid/ec_handle_%s.mp4',chain_robot.name); HZ = 10;
+vobj = init_vid_record(vid_path,'HZ',10,'SAVE_VID',SAVE_VID);
+for tick = 1:100
+    % Check external collisions
+    collision_margin = 0; % positive margin -> less collision
+    [chain_robot,ik_info,ec_link_cap_pairs,ec_dist] = ...
+        handle_ec_with_ik(chain_robot,external_capsules,'collision_margin',collision_margin);
+    if isempty(ec_link_cap_pairs), EC = 0; else, EC = 1; end
+    
+    % Plot
+    fig_idx = 1; view_info = [51,25]; axis_info = [-0.5,0.7,-0.8,0.8,0,1.4];
+    axes_info = [0.02,0,0.95,0.9];
+    fig = plot_chain(chain_robot,'fig_idx',fig_idx,'subfig_idx',1,'fig_pos',[0.0,0.5,0.3,0.45],...
+        'view_info',view_info,...
+        'axis_info',axis_info,'AXIS_OFF',0,'axes_info',axes_info,'mfa',0.1,...
+        'PLOT_CAPSULE',0,...
+        'PLOT_LINK',1,'PLOT_BOX_ADDED',1,'bafa',0.3,'PLOT_ROTATE_AXIS',1,'DISREGARD_JOI_GUIDE',1);
+    % Reset
+    plot_capsule('','RESET',1); % reset capsule
+    plot_ik_targets('RESET',1); % reset IK targets
+    % Collision links
+    for collision_idx = 1:size(ec_link_cap_pairs,1)
+        link_idx = ec_link_cap_pairs(collision_idx,1);
+        link_i = chain_robot.link(link_idx);
+        cap_i = link_i.capsule;
+        joint_idx_i = link_i.joint_idx;
+        T_i = pr2t(chain_robot.joint(joint_idx_i).p,chain_robot.joint(joint_idx_i).R);
+        cap_i = get_capsule_shape('T_offset',cap_i.T_offset,'radius',cap_i.radius+0.01,...
+            'height',cap_i.height); % increase capsule radius
+        plot_capsule(cap_i,'fig_idx',fig_idx,'subfig_idx',collision_idx,...
+            'T',T_i,'cfc','b','cfa',0.4,'cec','none');
+    end
+    for cap_idx = 1:length(external_capsules)
+        plot_capsule(external_capsules{cap_idx},'fig_idx',fig_idx,'subfig_idx',50+cap_idx,...
+            'cfc','r','cfa',0.2);
     end
     % Plot IK information
     ik_plot_info = get_ik_plot_info_from_ik_info(ik_info); % IK information
