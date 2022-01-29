@@ -7,4 +7,6 @@ It contains a number of examples using YART (Yet-Another-Robot-Toolbox) includin
 - Machine learning methods (Gaussian processes, determinantal point processes, black-box optimization methods)
 - etc
 
+Full YART is not released yet, but a simple version of YART can be found [here](https://github.com/sjchoi86/yart_tutorial).
+
 Contact: Sungjoon (sungjoon-choi@korea.ac.kr)
