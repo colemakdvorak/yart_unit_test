@@ -6,7 +6,7 @@ p1 = cv([0,0,0]);
 p2 = cv([0,3,0]);
 R1 = rpy2r(360*rand(1,3)*D2R); % on SO(3), Lie Group
 R2 = rpy2r(360*rand(1,3)*D2R);
-max_tick = 100;
+max_tick = 200;
 cnt = 0;
 for tick = 1:max_tick % for each tick
     rate = tick/max_tick;
@@ -26,11 +26,13 @@ for tick = 1:max_tick % for each tick
         cnt = cnt + 1;
         plot_T(pr2t(p_t,R_t),'fig_idx',fig_idx,'subfig_idx',4+cnt,'alw',1,...
             'PLOT_AXIS_TIP',1,'atr',0.01);
-        plot_title(sprintf('[%d/%d] Interploate SO(3)',tick,max_tick),...
+        plot_title(sprintf('[%d/%d] SO(3) Interpolation',tick,max_tick),...
             'fig_idx',fig_idx,'tfs',20,'Interpreter','latex');
         drawnow; if ~ishandle(fig), break; end
     end
 end % for tick = 1:max_tick % for each tick
+% Save image
+save2png(fig,'../img/so(3)_interpolation.png');
 
 %% Get revolute joint names from root to certain joints of interest
 ccc
@@ -85,7 +87,7 @@ acc_smt = A_acc*x_smt;
 % Figure 1. Original Trajectory
 m = 0.1*(max(x_in)-min(x_in));
 axis_info = [t_min,t_max,min(x_in)-m,max(x_in)+m]; axes_info = [0.08,0.12,0.88,0.8];
-fig_idx = 1; set_fig(figure(fig_idx),'pos',[0.0,0.7,0.3,0.3],'AXIS_EQUAL',0,...
+fig_idx = 1; fig1 = set_fig(figure(fig_idx),'pos',[0.0,0.7,0.3,0.3],'AXIS_EQUAL',0,...
     'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','x(t)','afs',17,...
     'axes_info',axes_info);
 plot(t_in,x_in,'-','color','k','linewidth',2);
@@ -95,7 +97,7 @@ plot_title(title_str,'fig_idx',fig_idx,'tfs',16);
 % Figure 2. Original Velocity
 m = 0.1*(max(vel_in)-min(vel_in));
 axis_info = [t_min,t_max,min(vel_in)-m,max(vel_in)+m]; axes_info = [0.08,0.12,0.88,0.8];
-fig_idx = 2; set_fig(figure(fig_idx),'pos',[0.3,0.7,0.3,0.3],'AXIS_EQUAL',0,...
+fig_idx = 2; fig2 = set_fig(figure(fig_idx),'pos',[0.3,0.7,0.3,0.3],'AXIS_EQUAL',0,...
     'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','$\dot{x}(t)$','afs',17,...
     'axes_info',axes_info);
 plot(t_in,vel_in,'-','color','k','linewidth',2);
@@ -107,7 +109,7 @@ plot_title(title_str,'fig_idx',fig_idx,'tfs',16);
 % Figure 3. Original Acceleration
 m = 0.1*(max(acc_in)-min(acc_in));
 axis_info = [t_min,t_max,min(acc_in)-m,max(acc_in)+m]; axes_info = [0.08,0.12,0.88,0.8];
-fig_idx = 3; set_fig(figure(fig_idx),'pos',[0.6,0.7,0.3,0.3],'AXIS_EQUAL',0,...
+fig_idx = 3; fig3 = set_fig(figure(fig_idx),'pos',[0.6,0.7,0.3,0.3],'AXIS_EQUAL',0,...
     'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','$\ddot{x}(t)$','afs',17,...
     'axes_info',axes_info);
 plot(t_in,acc_in,'-','color','k','linewidth',2);
@@ -119,7 +121,7 @@ plot_title(title_str,'fig_idx',fig_idx,'tfs',16);
 % Figure 4. Smoothed Trajectory
 m = 0.1*(max(x_in)-min(x_in));
 axis_info = [t_min,t_max,min(x_in)-m,max(x_in)+m]; axes_info = [0.08,0.12,0.88,0.8];
-fig_idx = 4; set_fig(figure(fig_idx),'pos',[0.0,0.35,0.3,0.3],'AXIS_EQUAL',0,...
+fig_idx = 4; fig4 = set_fig(figure(fig_idx),'pos',[0.0,0.35,0.3,0.3],'AXIS_EQUAL',0,...
     'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','x(t)','afs',17,...
     'axes_info',axes_info);
 h_x_in = plot(t_in,x_in,'-','color','k','linewidth',2);
@@ -133,7 +135,7 @@ plot_title(title_str,'fig_idx',fig_idx,'tfs',16);
 % Figure 5. Smoothed Velocity
 m = 0.1*(max(vel_in)-min(vel_in));
 axis_info = [t_min,t_max,min(vel_in)-m,max(vel_in)+m]; axes_info = [0.08,0.12,0.88,0.8];
-fig_idx = 5; set_fig(figure(fig_idx),'pos',[0.3,0.35,0.3,0.3],'AXIS_EQUAL',0,...
+fig_idx = 5; fig5 = set_fig(figure(fig_idx),'pos',[0.3,0.35,0.3,0.3],'AXIS_EQUAL',0,...
     'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','$\dot{x}(t)$','afs',17,...
     'axes_info',axes_info);
 h_vel_in = plot(t_in,vel_in,'-','color','k','linewidth',2);
@@ -149,7 +151,7 @@ plot_title(title_str,'fig_idx',fig_idx,'tfs',16);
 % Figure 6. Smoothed Acceleration
 m = 0.1*(max(acc_in)-min(acc_in));
 axis_info = [t_min,t_max,min(acc_in)-m,max(acc_in)+m]; axes_info = [0.08,0.12,0.88,0.8];
-fig_idx = 6; set_fig(figure(fig_idx),'pos',[0.6,0.35,0.3,0.3],'AXIS_EQUAL',0,...
+fig_idx = 6; fig6 = set_fig(figure(fig_idx),'pos',[0.6,0.35,0.3,0.3],'AXIS_EQUAL',0,...
     'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','$\ddot{x}(t)$','afs',17,...
     'axes_info',axes_info);
 h_acc_in = plot(t_in,acc_in,'-','color','k','linewidth',2);
@@ -161,6 +163,9 @@ legend([h_acc_in,h_acc_smt,h_acc_th],...
     'fontsize',12,'fontname','consolas','location','northwest');
 title_str = sprintf('Smoothed Acceleration');
 plot_title(title_str,'fig_idx',fig_idx,'tfs',16);
+save2png(fig1,'../img/optm_smt_1_org_traj.png'); save2png(fig2,'../img/optm_smt_2_org_vel.png');
+save2png(fig3,'../img/optm_smt_3_org_acc.png'); save2png(fig4,'../img/optm_smt_4_smt_traj.png');
+save2png(fig5,'../img/optm_smt_5_smt_vel.png'); save2png(fig6,'../img/optm_smt_6_smt_acc.png');
 
 %% Define addition and subtraction on 2-Sphere
 ccc
@@ -281,6 +286,7 @@ for tick = round(linspace(1,L,20)) % loop
     record_vid(vobj,'fig',fig);
 end % for tick = 1:L % loop
 end_vid_record(vobj);
+save2png(fig,'../img/sphere_algebra.png')
 
 %% Normal plane on a 2-Sphere
 ccc
@@ -313,6 +319,7 @@ plot_plane('fig_idx',fig_idx,'subfig_idx',1,...
     'plane_normal',uv1,'plane_center',uv1,'pfc',0.5*[1,1,1]);
 plot_title('Normal Plane',...
     'fig_idx',fig_idx,'tfs',20,'interpreter','latex','ALLOW_UNDERBAR',1);
+save2png(fig,'../img/sphere_normal_plane.png')
 
 %% Find a rotation offset to align a specific axis of a rotation matrix.
 ccc
@@ -604,7 +611,7 @@ plot_title('Histogram of H-VOO Samples','fig_idx',3,'tfs',20);
 axis off; dragzoom;
 
 %% Locally Approximating Determinantal Point Process (LA-DPP)
-% ccc
+ccc
 n = 1000;
 x = [rand([n/2,2]); 0.2*rand([n/2,2])]; % imbalanced inputs
 k = 20;
@@ -620,6 +627,7 @@ hu = plot(x_unif(:,1),x_unif(:,2),'bs','MarkerSize',15,'LineWidth',3);
 legend([hr,hs,hu],{'Raw Data','LA-DPP Sampling','Uniform Sampling'},...
     'fontsize',15,'interpreter','Latex');
 plot_title('Uniform Sampling and LA-DPP Sampling','tfs',20,'interpreter','latex');
+save2png(fig,'../img/ladpp.png')
 
 %% Surrounding capsule optimization
 ccc
@@ -651,7 +659,7 @@ ccc
 % Configuration
 robot_name  = 'thormang_rilab';
 rseed       = 0;
-SAVE_VID    = 0;
+SAVE_VID    = 1;
 % Get robot with collision
 rng(rseed); % fix random seed
 urdf_path = sprintf('../../yet-another-robotics-toolbox/urdf/%s/%s_urdf.xml',robot_name,robot_name);
@@ -666,7 +674,7 @@ while 1 % loop until self-collision occurs
     if SC, break; end
 end % while 1 % loop until self-collision occurs
 % Loop to solve IK
-vid_path = sprintf('vid/unit_test/sc_handle_%s_seed%02d.mp4',robot_name,rseed); HZ = 10;
+vid_path = sprintf('../vid/unit_test/sc_handle_%s_seed%02d.mp4',robot_name,rseed); HZ = 10;
 tick = 0; vobj = init_vid_record(vid_path,'HZ',HZ,'SAVE_VID',SAVE_VID);
 while SC % loop until collision-free
     tick = tick + 1;
