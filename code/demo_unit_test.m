@@ -923,6 +923,7 @@ caps = {cap1,cap2};
 vid_path = sprintf('../vid/unit_test/ec_handle_%s.mp4',chain_robot.name); HZ = 10;
 vobj = init_vid_record(vid_path,'HZ',HZ,'SAVE_VID',SAVE_VID);
 for tick = 1:100
+    
     % Handle external collision
     collision_margin = 0; % positive margin -> less collision
     collision_pairs = []; % (robot link index, capsule index)
@@ -1001,6 +1002,7 @@ for tick = 1:100
         chain_robot = update_chain_q(chain_robot,ik_info.joint_names_to_ctrl,q,'FK',1,'FV',0);
     end
     
+    
     % Plot
     fig_idx = 1; view_info = [51,25]; axis_info = [-1,1,-1.5,1.5,0,2]; axes_info = [0.02,0,0.95,0.9];
     fig = plot_chain(chain_robot,'fig_idx',fig_idx,'subfig_idx',1,'fig_pos',[0.0,0.5,0.3,0.45],...
@@ -1043,16 +1045,356 @@ end
 end_vid_record(vobj);
 fprintf(2,'Done.\n');
 
+%% Compute mu, d_mu, and dd_mu using Gaussian random path
+ccc
+% Reference data
+f_ref = @(x)( cos(x) ); % reference function
+t_max = 4*pi;
+t_ref = linspace(0,t_max,1000)';
+x_ref = f_ref(t_ref);
+% Anchor dataset (training data)
+n_anchor  = 100;
+t_anchor  = linspace(0,t_max,n_anchor)';
+noise_var = 1e-2;
+x_anchor  = f_ref(t_anchor) + sqrt(noise_var)*randn(size(t_anchor));
+l_anchor  = ones(n_anchor,1);
+% Gaussian random path
+n_test = 1000;
+t_test = linspace(0,t_max,n_test)';
+hyp = [1,3]; % [gain,len]
+[k_test,dk_test,ddk_test] = kernel_levse(t_test,t_anchor,ones(n_test,1),l_anchor,hyp);
+K_anchor = kernel_levse(t_anchor,t_anchor,l_anchor,l_anchor,hyp);
+% Compute mu, d_mu, and dd_mu
+meas_std = 1e-2; % expected noise
+mu_test = k_test / (K_anchor+meas_std*eye(n_anchor,n_anchor)) * x_anchor;
+dmu_test = dk_test / (K_anchor+meas_std*eye(n_anchor,n_anchor)) * x_anchor;
+ddmu_test = ddk_test / (K_anchor+meas_std*eye(n_anchor,n_anchor)) * x_anchor;
+% Plot mu, dmu, ddmu
+set_fig(figure(1),'pos',[0.5,0.4,0.5,0.3],...
+    'view_info','','axis_info',[0,4*pi,-1.5,1.5],'AXIS_EQUAL',0,'GRID_ON',1,...
+    'REMOVE_MENUBAR',1,'USE_DRAGZOOM',0,'SET_CAMLIGHT',1,'SET_MATERIAL','METAL',...
+    'SET_AXISLABEL',1,'ax_str','t','ay_str','f(t)','afs',18,'interpreter','latex');
+h_ref    = plot(t_ref,x_ref,'k-','linewidth',3);
+h_mu     = plot(t_test,mu_test,'r:','linewidth',3);
+h_dmu    = plot(t_test,dmu_test,'-','linewidth',2,'Color','m');
+h_ddmu   = plot(t_test,ddmu_test,'-','linewidth',2,'Color','c');
+h_anchor = plot(t_anchor,x_anchor,'bo','linewidth',1,'markersize',11);
+legend([h_ref,h_anchor,h_mu,h_dmu,h_ddmu],...
+    {'$f(t)$','Observation','$\hat{\mu}(t)$',...
+    '$\frac{d}{dt} \hat{\mu}(t)$','$\frac{d^2}{dt^2} \hat{\mu}(t)$'},...
+    'fontsize',15,'interpreter','latex','location','NorthEastOutside');
+plot_title('Estimated First and Second Derivatives using Gaussian Processes',...
+    'interpreter','latex','tfs',20);
+
+%% Find a rotational matrix that aligns two vectors using 'get_r_a_to_b'
+ccc
+p_a = rand(3,1);
+p_b = rand(3,1);
+R_a2b = get_r_a_to_b(p_a,p_b);
+R_p_a = R_a2b*p_a; % <= this aligns with 'p_b'
+% Plot
+fig = set_fig(figure(1),'pos',[0.6,0.4,0.3,0.55],...
+    'view_info',[80,26],'axis_info',1.1*[-1/10,+1,-1/10,+1,-1/10,+1],'AXIS_EQUAL',1,'GRID_ON',1,...
+    'REMOVE_MENUBAR',1,'USE_DRAGZOOM',1,'SET_CAMLIGHT',1,'SET_MATERIAL','METAL',...
+    'SET_AXISLABEL',1,'afs',18);
+plot_line(cv([0,0,0]),p_a,'fig_idx',1,'subfig_idx',1,'lc','r');
+plot_line(cv([0,0,0]),p_b,'fig_idx',1,'subfig_idx',2,'lc','b');
+plot_line(cv([0,0,0]),R_p_a,'fig_idx',1,'subfig_idx',3,'lc','c','ls','--');
+plot_T(pr2t('',''),'fig_idx',1,'subfig_idx',1,'alc','k'); % {W}
+plot_T(pr2t(p_a,''),'fig_idx',1,'subfig_idx',2,'PLOT_AXIS',0,...
+    'PLOT_SPHERE',1,'sr',0.03,'sfc','r','sfa',0.5,...
+    'text_str','$~\mathbf{p}_a$','text_interp','latex','text_fs',21);
+plot_T(pr2t(p_b,''),'fig_idx',1,'subfig_idx',3,'PLOT_AXIS',0,...
+    'PLOT_SPHERE',1,'sr',0.03,'sfc','b','sfa',0.5,...
+    'text_str','$~\mathbf{p}_b$','text_interp','latex','text_fs',21);
+plot_T(pr2t(R_p_a,''),'fig_idx',1,'subfig_idx',4,'PLOT_AXIS',0,...
+    'PLOT_SPHERE',1,'sr',0.03,'sfc','c','sfa',0.5,...
+    'text_str','$~R\mathbf{p}_a$','text_interp','latex','text_fs',21);
+
+%% Interpolate rotation matrices using GRP
+%
+% Here, we use three different methods
+%  1. Optimal geodesic curve on SO(3)
+%  2. GRP smoothing on so(3)
+%  3. GPR smoothing on 6D continuous representation presented in [1]
+%
+% [1]. "On the Continuity of Rotation Representations in Neural Networks"
+%
+ccc
+% Get two rotation matrices
+p1 = cv([0,0,0]);
+p2 = cv([0,3,0]);
+R1 = rpy2r(360*rand(1,3)*D2R); % on SO(3), Lie Group
+R2 = rpy2r(360*rand(1,3)*D2R);
+w1 = r2w(R1); % on so(3)
+w2 = r2w(R2);
+g1 = norm(w1);
+g2 = norm(w2);
+b1 = so3_to_sixd(R1);
+b2 = so3_to_sixd(R2);
+% Interpolate on so(3), Lie Algebra
+max_tick = 100;
+t_in_ref = cv(linspace(0,1,max_tick));
+w_traj = smooth_with_grp_multi_dim([w1';w2'],'t_test',t_in_ref,'hyp_mu',[1,1]);
+% Interpolate using Rodrigues' formula
+R1to2 = R1'*R2;
+w1to2 = r2w(R1to2);
+% Interpolate using 6D representation
+b_traj = smooth_with_grp_multi_dim([b1';b2'],'t_test',t_in_ref,'hyp_mu',[1,1]);
+
+% Loop
+x_traj_so3 = []; y_traj_so3 = []; z_traj_so3 = [];
+x_traj_rod = []; y_traj_rod = []; z_traj_rod = [];
+x_traj_sixd = []; y_traj_sixd = []; z_traj_sixd = [];
+w_rod_traj = zeros(max_tick,3);
+for tick = 1:max_tick
+    rate = tick/max_tick;
+    p_t = (1-rate)*p1 + rate*p2;
+    % Interpolate in so(3) GRP
+    w_t = w_traj(tick,:);
+    R_t_so3 = rodrigues(uv(w_t),norm(w_t));
+    x_traj_so3 = [x_traj_so3; 1.0*rv(p_t+R_t_so3(:,1))];
+    y_traj_so3 = [y_traj_so3; 1.0*rv(p_t+R_t_so3(:,2))];
+    z_traj_so3 = [z_traj_so3; 1.0*rv(p_t+R_t_so3(:,3))];
+    % Interpolate using Rodrigues
+    R_t_rod = R1*rodrigues(w1to2/norm(w1to2),norm(w1to2)*(rate)); % interpolate
+    x_traj_rod = [x_traj_rod; 1.0*rv(p_t+R_t_rod(:,1))];
+    y_traj_rod = [y_traj_rod; 1.0*rv(p_t+R_t_rod(:,2))];
+    z_traj_rod = [z_traj_rod; 1.0*rv(p_t+R_t_rod(:,3))];
+    w_rod_traj(tick,:) = rv(r2w(R_t_rod));
+    % Interpolate using 6D representation
+    b_t = b_traj(tick,:);
+    R_t_sixd = sixd_to_so3(b_t);
+    x_traj_sixd = [x_traj_sixd; 1.0*rv(p_t+R_t_sixd(:,1))];
+    y_traj_sixd = [y_traj_sixd; 1.0*rv(p_t+R_t_sixd(:,2))];
+    z_traj_sixd = [z_traj_sixd; 1.0*rv(p_t+R_t_sixd(:,3))];
+    % Animate
+    if mod(tick,5) == 0
+        fig_idx = 1;
+        fig = set_fig(figure(fig_idx),'pos',[0.6,0.4,0.5,0.55],...
+            'view_info',[80,26],'axis_info',[-1,+1,-1,+4,-1,+1],'AXIS_EQUAL',1,'GRID_ON',1,...
+            'REMOVE_MENUBAR',1,'USE_DRAGZOOM',1,'SET_CAMLIGHT',1,'SET_MATERIAL','METAL',...
+            'SET_AXISLABEL',1,'afs',18);
+        plot_T(pr2t(p1,R1),'fig_idx',fig_idx,'subfig_idx',1,'alw',4,'PLOT_AXIS_TIP',1);
+        plot_T(pr2t(p2,R2),'fig_idx',fig_idx,'subfig_idx',2,'alw',4,'PLOT_AXIS_TIP',1);
+        plot_T(pr2t(p_t,R_t_so3),'fig_idx',fig_idx,'subfig_idx',3,'alw',4,'PLOT_AXIS_TIP',1);
+        plot_T(pr2t(p_t,R_t_rod),'fig_idx',fig_idx,'subfig_idx',4,'alw',4,'PLOT_AXIS_TIP',1);
+        plot_T(pr2t(p_t,R_t_sixd),'fig_idx',fig_idx,'subfig_idx',5,'alw',4,'PLOT_AXIS_TIP',1);
+        h_so3 = plot_traj(x_traj_so3,'fig_idx',fig_idx,'subfig_idx',1,'tlc','r','tlw',1,'tls','--');
+        plot_traj(y_traj_so3,'fig_idx',fig_idx,'subfig_idx',2,'tlc','g','tlw',1,'tls','--');
+        plot_traj(z_traj_so3,'fig_idx',fig_idx,'subfig_idx',3,'tlc','b','tlw',1,'tls','--');
+        h_rod = plot_traj(x_traj_rod,'fig_idx',fig_idx,'subfig_idx',4,'tlc','r','tlw',1,'tls','-');
+        plot_traj(y_traj_rod,'fig_idx',fig_idx,'subfig_idx',5,'tlc','g','tlw',1,'tls','-');
+        plot_traj(z_traj_rod,'fig_idx',fig_idx,'subfig_idx',6,'tlc','b','tlw',1,'tls','-');
+        h_sixd = plot_traj(x_traj_sixd,'fig_idx',fig_idx,'subfig_idx',7,...
+            'tlc','r','tlw',2,'tls',':');
+        plot_traj(y_traj_sixd,'fig_idx',fig_idx,'subfig_idx',8,'tlc','g','tlw',2,'tls',':');
+        plot_traj(z_traj_sixd,'fig_idx',fig_idx,'subfig_idx',9,'tlc','b','tlw',2,'tls',':');
+        plot_title(sprintf('[%d/%d]',tick,max_tick),...
+            'fig_idx',fig_idx,'tfs',20,'Interpreter','latex');
+        plot_legend([h_rod,h_so3,h_sixd],...
+            {'Optimal Interpolation','GRP on so(3)','GRP on 6D Representation'},...
+            'lfs',15,'interpreter','latex','ll','SouthEast');
+        drawnow; if ~ishandle(fig), break; end
+    end
+end
+
+%% Gaussian Random Path Sampling in 1D
+ccc
+% Anchor points
+t_anchor = [0,1/3,2/3,1.0]';
+x_anchor = [0,1.0,-2.0,3.0]';
+l_anchor = [1,1-0.1,1-0.5,1]';
+
+% t_anchor = [0,0.5,1.0]';
+% x_anchor = [0,1.0,3.0]';
+% l_anchor = [1,0.3,1]';
+
+eps_ru   = 0.01;
+
+% Test data
+n_test = 1000;
+t_test = linspace(0,1,n_test)';
+
+% Hyper parameters
+hyp_mu  = [1,1.0]; % [gain,len]
+hyp_var = [2,0.2]; % [gain,len]
+
+% Initialize GRP
+grp1d = init_grp1d(t_anchor,x_anchor,l_anchor,t_test,hyp_mu,hyp_var,'eps_ru',eps_ru,...
+    'APPLY_LEVERAGE_TO_MU',1);
+
+% Sample GRP paths
+n_path = 100;
+randomness = randn(n_test,n_path);
+sampled_trajs = sqrt(grp1d.K_max)*grp1d.chol_K*randomness + grp1d.mu_test;
+
+% Plot
+plot_grp1d(grp1d,sampled_trajs);
+
+%% Gaussian Random Path Sampling in 2D
+ccc
+% Initialize 2D GRP
+t_anchor  = cv([0,1]);
+xy_anchor = [0,-8; 0,8];
+n_test    = 1000;
+t_test    = linspace(0,1,n_test)';
+hyp_mu    = [0.1,1.0]; % [gain,len]
+hyp_var   = [1,0.2]; % [gain,len]
+eps_ru    = 0.001;
+grp_x = init_grp1d(t_anchor,cv(xy_anchor(:,1)),ones(size(t_anchor)),...
+    t_test,hyp_mu,hyp_var,'eps_ru',eps_ru);
+hyp_mu    = [0.1,1.0]; % [gain,len]
+hyp_var   = [1,0.2]; % [gain,len]
+eps_ru    = 0.01;
+grp_y = init_grp1d(t_anchor,cv(xy_anchor(:,2)),ones(size(t_anchor)),...
+    t_test,hyp_mu,hyp_var,'eps_ru',eps_ru);
+
+% Sample GRP paths in 2D
+n_path = 10;
+randomness = randn(n_test,n_path);
+sampled_x_trajs = sqrt(grp_x.K_max)*grp_x.chol_K*randomness + grp_x.mu_test;
+sampled_y_trajs = sqrt(grp_y.K_max)*grp_y.chol_K*randomness + grp_y.mu_test;
+
+% Plot sampled paths
+figure(1); hold on; axis equal; grid on;
+booth_colors = linspecer(n_path);
+for i_idx = 1:n_path
+    xy_traj = [sampled_x_trajs(:,i_idx),sampled_y_trajs(:,i_idx)];
+    color = booth_colors(i_idx,:);
+    plot(xy_traj(:,1),xy_traj(:,2),'-','color',color);
+end
+
+%% Determinantal Trajectory Process
+ccc
+
+t_min = 0; t_max = 1.0;
+n_test = 1000;
+t_test = cv(linspace(t_min,t_max,n_test));
+l_test = ones(n_test,1);
+hyp = [1,1/4]; sig2w = 1e-6;
+K = kernel_levse(t_test,t_test,l_test,l_test,hyp);
+K_chol = chol(K + sig2w*eye(n_test,n_test))';
+
+% Sample from GP prior
+n_traj = 200;
+trajs = K_chol * randn(n_test,n_traj);
+
+% Now, select subset using DPP with Hilbert Space norm-ish
+idx_temp = round(linspace(1,n_test,50));
+x = trajs(idx_temp,:)';
+k = 5; % number of subset
+C = kernel_levse(t_test(idx_temp),t_test(idx_temp),l_test(idx_temp),l_test(idx_temp),hyp);
+C = 0.5*(C+C') + sig2w*eye(size(C));
+[sub_idx_dpp,K_dpp] = get_sub_idx_ladpp(x,k,'C',C,'k_gain',20);
+
+% Plot
+fig_idx = 1; axis_info = [t_min,t_max,-inf,+inf]; axes_info = [0.08,0.12,0.88,0.8];
+fig1 = set_fig(figure(fig_idx),'pos',[0.0,0.7,0.3,0.3],'AXIS_EQUAL',0,...
+    'USE_DRAGZOOM',0,'axis_info',axis_info,'ax_str','t','ay_str','x(t)','afs',17,...
+    'axes_info',axes_info);
+% Plot all sampled trajectories
+for i_idx = 1:n_traj
+    traj = trajs(:,i_idx);
+    h_sample = plot(t_test,traj,'-','color',0.5*[1,1,1],'linewidth',1/2);
+end
+% Plot random-selected ones
+sub_idx_rand = randperm(n_traj,k);
+for i_idx = 1:k
+    traj = trajs(:,sub_idx_rand(i_idx));
+    color = 'b';
+    h_rand = plot(t_test,traj,'-','color',color,'linewidth',1);
+end
+% Plot DPP-selected ones
+for i_idx = 1:k
+    traj = trajs(:,sub_idx_dpp(i_idx));
+    color = 'r';
+    h_dpp = plot(t_test,traj,'-','color',color,'linewidth',2);
+end
+lfc = 'w'; lfs = 13; ll = 'best';
+plot_legend([h_sample,h_rand,h_dpp],...
+    {'GP-sampled Trajectories.',...
+    'Randomly-selected Trajectories',...
+    'DPP-selected Trajectories'},...
+    'fig_idx',fig_idx,'lfc',lfc,'lfs',lfs,'interpreter','latex','ll',ll);
+title_str = sprintf('Determinantal Trajectory Process');
+plot_title(title_str,'fig_idx',fig_idx,'tfs',18);
+
+%% Quality-Diversity Optimization 
+ccc
+
+rng(1);
+% Set grid (domain)
+xmin = 0; xmax = 10; nx = 200; ymin = 0; ymax = 10; ny = 200;
+[xgrid,ygrid] = meshgrid(linspace(xmin,xmax,nx),linspace(ymin,ymax,ny));
+xygrid = [xgrid(:),ygrid(:)];
+
+% Define the cost function using GMM
+mu = [7.5,2.5;2.5,7.5;7.5,7.5];
+sigma = cat(3,[1.0,0.0;0.0,1.0],[1.0,0.0;0.0,1.0],[1.0,0.0;0.0,1.0]);
+probs = [1,1,2]; probs = probs/sum(probs);
+gm = gmdistribution(mu,sigma,probs);
+f = @(x)(10*(gm.pdf(x))); % this will be our score function
+
+% Random sampling first
+n_pool = 3000;
+x_pool = rand(n_pool,2)*diag([xmax,ymax]) + [xmin,ymin];
+f_pool = f(x_pool);
+gain = 1; len = 1;
+K_pool = kernel_levse(x_pool,x_pool,ones(n_pool,1),ones(n_pool,1),[gain,len]);
+
+% LA-DPP
+k = 20; % number of selections
+idxs_ladpp = zeros(k,1); remain_idxs = (1:n_pool)'; idx_ladpp = [];
+[~,sel_idx] = max(f_pool); % first index to be the one with the maximum score
+remain_idxs(remain_idxs==sel_idx) = [];
+idxs_ladpp(1) = sel_idx; % append
+for k_idx = 2:k % select (k-1) ones
+    n_remain = length(remain_idxs);
+    score_values = zeros(n_remain,1);
+    similarity_values = zeros(n_remain,1);
+    for r_idx = 1:n_remain % for the remaining ones
+        remain_idx = remain_idxs(r_idx);
+        x_prime = x_pool(remain_idx,:);
+        score_r = f(x_prime);
+        idxs_ladpp_curr = idxs_ladpp(1:(k_idx-1));
+        sim_rs = cv(K_pool(remain_idx,idxs_ladpp_curr).^2) ./ ...
+            (sigmoid(whitening(f_pool(idxs_ladpp_curr))));
+        sim_r = mean(sim_rs);
+        % Append score and similarity values
+        score_values(r_idx) = score_r;
+        similarity_values(r_idx) = sim_r; 
+    end
+    acqusition_values = whitening(score_values) - whitening(similarity_values);
+    [~,max_idx] = max(acqusition_values); % select the one with the maximum acquisition value
+    sel_idx = remain_idxs(max_idx); 
+    remain_idxs(remain_idxs==sel_idx) = [];
+    idxs_ladpp(k_idx) = sel_idx; % append
+end
+
+% Figure 1: score map
+fig_idx = 1; axes_info = [0.03,0.08,0.93,0.85]; view_info = [88,16];
+set_fig(figure(fig_idx),'pos',[0.0,0.6,0.3,0.45],'axes_info',axes_info);
+fval = f(xygrid); fmtx = reshape(fval,ny,nx); % reshape
+h = pcolor(xgrid,ygrid,fmtx); colormap(linspecer);
+cb = colorbar; cb.FontSize = 12; cb.FontName = 'consolas';
+set(h,'EdgeColor','none','FaceAlpha',0.98); set(gcf,'color','w');
+axis([xmin,xmax,ymin,ymax]); axis('on', 'image'); axis on; dragzoom;
+plot_title('Score Map','fig_idx',fig_idx,'tfs',20);
+
+% Figure 2: DPP sample
+fig_idx = 2; axes_info = [0.03,0.08,0.93,0.85];
+set_fig(figure(fig_idx),'pos',[0.3,0.6,0.3,0.45],'axes_info',axes_info);
+h = pcolor(xgrid,ygrid,fmtx); colormap(linspecer);
+cb = colorbar; cb.FontSize = 12; cb.FontName = 'consolas';
+set(h,'EdgeColor','none','FaceAlpha',0.4); set(gcf,'color','w');
+plot(x_pool(:,1),x_pool(:,2),'.','color','k','markersize',1/2);
+plot(x_pool(idxs_ladpp,1),x_pool(idxs_ladpp,2),'o',...
+    'color','r','markersize',10,'linewidth',2);
+axis([xmin,xmax,ymin,ymax]); axis('on', 'image'); axis on; dragzoom;
+plot_title('Samples from k-DPP','fig_idx',fig_idx,'tfs',20);
+drawnow;
+
 %%
-
-
-
-
-
-
-
-
-
-
 
 
