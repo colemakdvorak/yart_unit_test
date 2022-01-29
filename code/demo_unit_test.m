@@ -907,7 +907,7 @@ end
 %% Handle external collision handling with capsules
 ccc
 % Configuration
-SAVE_VID = 1;
+SAVE_VID = 0;
 % Robot
 urdf_path = '../../yet-another-robotics-toolbox/urdf/ambidex_labs/ambidex_labs_urdf.xml';
 cache_folder = '../cache';
@@ -919,89 +919,15 @@ cap1 = get_capsule_shape('T_offset',pr2t(cv([0.4,-0.9,1.0]),''),...
     'radius',0.4,'height',0.3);
 cap2 = get_capsule_shape('T_offset',pr2t(cv([0.4,0.9,1.0]),''),...
     'radius',0.5,'height',0.2);
-caps = {cap1,cap2};
+external_capsules = {cap1,cap2};
 vid_path = sprintf('../vid/unit_test/ec_handle_%s.mp4',chain_robot.name); HZ = 10;
 vobj = init_vid_record(vid_path,'HZ',HZ,'SAVE_VID',SAVE_VID);
 for tick = 1:100
-    
-    % Handle external collision
+    % Check external collisions
     collision_margin = 0; % positive margin -> less collision
-    collision_pairs = []; % (robot link index, capsule index)
-    collision_dist = inf; % minimum signed distance
-    EC = 0; % external collision
-    for link_idx = 1:chain_robot.n_link % for all links
-        link_i = chain_robot.link(link_idx);
-        cap_i = link_i.capsule;
-        if isempty(cap_i), continue; end
-        joint_idx_i = link_i.joint_idx;
-        if isempty(joint_idx_i), continue; end
-        T_i = pr2t(chain_robot.joint(joint_idx_i).p,chain_robot.joint(joint_idx_i).R);
-        cl_i = get_capsule_line(T_i,cap_i);
-        for cap_idx = 1:length(caps) % for all external capsules
-            cap_j = caps{cap_idx};
-            cl_j = get_capsule_line(pr2t('',''),cap_j);
-            line_dist = get_dist_lines(cl_i.p1,cl_i.p2,cl_j.p1,cl_j.p2);
-            cap_dist = line_dist - cap_i.radius - cap_j.radius;
-            if cap_dist < -collision_margin
-                collision_pairs = cat(1,collision_pairs,[link_idx,cap_idx]);
-                EC = 1;
-            end
-            if cap_dist < collision_dist
-                collision_dist = cap_dist;
-            end
-        end % for cap_idx = 1:length(caps) % for all external capsules
-    end % for link_idx = 1:chain_robot.n_link % for all links
-    
-    % Define IK info
-    len_offset = 0.05;
-    ik_info = init_ik_info(chain_robot,'joint_names_to_ctrl',chain_robot.rev_joint_names,...
-        'ik_err_th',0.5,'dq_th',5*D2R);
-    for collision_idx = 1:size(collision_pairs,1)
-        % Robot link capsule (i)
-        link_idx = collision_pairs(collision_idx,1); link_i = chain_robot.link(link_idx);
-        cap_i = link_i.capsule; joint_idx_i = link_i.joint_idx;
-        joint_name_i = chain_robot.joint(joint_idx_i).name;
-        T_i = pr2t(chain_robot.joint(joint_idx_i).p,chain_robot.joint(joint_idx_i).R);
-        % External capsule (j)
-        cap_idx = collision_pairs(collision_idx,2);
-        cap_j = caps{cap_idx}; T_j = pr2t('','');
-        cl_i = get_capsule_line(T_i,cap_i); cl_j = get_capsule_line(T_j,cap_j);
-        p_mid_i = 0.5*(cl_i.p1+cl_i.p2); p_mid_j = 0.5*(cl_j.p1+cl_j.p2);
-        p_mid = 0.5*(p_mid_i+p_mid_j);
-        uv_repulse_i = uv(p_mid_i-p_mid); uv_repulse_j = uv(p_mid_j-p_mid);
-        
-        % Add IK information to handle self-collsion for i-th joint
-        if ~isempty(chain_robot.joint(joint_idx_i).childs)
-            % If child joints exist, use both childs and parent joint for IK
-            for child_idx = chain_robot.joint(joint_idx_i).childs
-                joint_name_child = chain_robot.joint_names{child_idx};
-                T_child = pr2t(chain_robot.joint(child_idx).p,'');
-                ik_info = add_ik_info(ik_info,'joint_name',joint_name_child,...
-                    'type','IK_P','weight',1,'coord',T_child + pr2t(uv_repulse_i*len_offset,''));
-            end
-            ik_info = add_ik_info(ik_info,'joint_name',joint_name_i,...
-                'type','IK_P','weight',1,'coord',T_i + pr2t(uv_repulse_i*len_offset,''));
-        else
-            % Otherwise, add the parent joint
-            ik_info = add_ik_info(ik_info,'joint_name',joint_name_i,...
-                'type','IK_P','weight',1,'coord',T_i + pr2t(uv_repulse_i*len_offset,''));
-        end
-    end
-    
-    % Update robot with IK
-    UNIT_DQ_HEURISTIC = 1; unit_dq_rad = 1*D2R;
-    if ik_info.n_trgt > 0
-        [dq,J_use,ik_err,det_J] = get_dq_from_ik_info(chain_robot,ik_info);
-        q = get_q_chain(chain_robot,ik_info.joint_names_to_ctrl);
-        % Simple hueristics
-        if UNIT_DQ_HEURISTIC
-            dq = dq / max(abs(dq));
-            dq = trim_scale(dq,unit_dq_rad);
-        end
-        q = q + dq;
-        chain_robot = update_chain_q(chain_robot,ik_info.joint_names_to_ctrl,q,'FK',1,'FV',0);
-    end
-    
+    [chain_robot,ik_info,ec_link_cap_pairs,ec_dist] = ...
+        handle_ec_with_ik(chain_robot,external_capsules,'collision_margin',collision_margin);
+    if isempty(ec_link_cap_pairs), EC = 0; else, EC = 1; end
     
     % Plot
     fig_idx = 1; view_info = [51,25]; axis_info = [-1,1,-1.5,1.5,0,2]; axes_info = [0.02,0,0.95,0.9];
@@ -1014,8 +940,8 @@ for tick = 1:100
     plot_capsule('','RESET',1); % reset capsule
     plot_ik_targets('RESET',1); % reset IK targets
     % Collision links
-    for collision_idx = 1:size(collision_pairs,1)
-        link_idx = collision_pairs(collision_idx,1);
+    for collision_idx = 1:size(ec_link_cap_pairs,1)
+        link_idx = ec_link_cap_pairs(collision_idx,1);
         link_i = chain_robot.link(link_idx);
         cap_i = link_i.capsule;
         joint_idx_i = link_i.joint_idx;
@@ -1025,8 +951,8 @@ for tick = 1:100
         plot_capsule(cap_i,'fig_idx',fig_idx,'subfig_idx',collision_idx,...
             'T',T_i,'cfc','b','cfa',0.4,'cec','none');
     end
-    for cap_idx = 1:length(caps)
-        plot_capsule(caps{cap_idx},'fig_idx',fig_idx,'subfig_idx',50+cap_idx,'cfc','r','cfa',0.2);
+    for cap_idx = 1:length(external_capsules)
+        plot_capsule(external_capsules{cap_idx},'fig_idx',fig_idx,'subfig_idx',50+cap_idx,'cfc','r','cfa',0.2);
     end
     % Plot IK information
     ik_plot_info = get_ik_plot_info_from_ik_info(ik_info); % IK information
@@ -1034,7 +960,7 @@ for tick = 1:100
     plot_ik_targets('chain_robot',chain_robot,'ik_plot_info',ik_plot_info,'sr',0.02,...
         'PLOT_ARROW',1,'adl',adl,'adsw',adl/10,'adtw',adl/5);
     if EC
-        title_str = sprintf('[%d] External Collision (%.3f)',tick,collision_dist);
+        title_str = sprintf('[%d] External Collision (%.3f)',tick,ec_dist);
     else
         title_str = sprintf('[%d] Collision Free',tick);
     end
@@ -3305,4 +3231,3 @@ while 1
 end
 
 %%
-
