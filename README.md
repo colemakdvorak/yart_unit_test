@@ -1,4 +1,4 @@
-# Unit Test Codes for YART
+# Unit Tests for YART
 
 It contains a number of examples using YART (Yet-Another-Robot-Toolbox) including
 - Solving forward kinematics, inverse kinematics, and inverse dynamics
